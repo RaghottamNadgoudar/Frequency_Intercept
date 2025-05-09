@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phantom Frequency Grid</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useMemo } = React;
+
+      // --- Game Data (Clues and Solutions) ---
+      const GAME_DATE = { year: 2025, month: 5, day: 10, monthName: "May" }; // May 10, 2025
+
+      const clues = [
+        {
+          id: "alpha",
+          title: "Target Alpha: The Emergency Beacon",
+          description: "Broadcasts only when main system integrity is compromised (simulated via 'AUX_POWER_REROUTE' switch on analyzer). Listen on GMRS channel 15. This is our primary SOS.",
+          targetFrequency: "462.550", // MHz
+          requiredSettings: { auxPowerRerouted: true },
+          segment: "DELTA"
+        },
+        {
+          id: "bravo",
+          title: "Target Bravo: The Whispering Number Station",
+          description: `Frequency (in kHz) is the current year (${GAME_DATE.year}) minus the number of days in a leap year (366). It's faint; set SQUELCH_LEVEL to 2 or lower. Transmits only the third digit of its payload (e.g., 8-2-X-1-9).`,
+          targetFrequency: (GAME_DATE.year - 366).toString(), // kHz -> 1659 kHz
+          requiredSettings: { squelchLevel: 2 }, // Max squelch level
+          payload: "8-2-5-1-9", // Example payload, player needs to extract '5'
+          segment: "5"
+        },
+        {
+          id: "charlie",
+          title: "Target Charlie: The Aviator's Harmonic",
+          description: "Hidden within standard aviation comms. The primary frequency is the standard civilian aviation emergency frequency (121.5 MHz). Our target signal is a harmonic, exactly 1.5 times this primary. You'll need 'FILTER_MODE: WIDE' to catch its spread.",
+          targetFrequency: (121.5 * 1.5).toFixed(2).toString(), // MHz -> 182.25 MHz
+          requiredSettings: { filterMode: "WIDE" },
+          segment: "ECHO"
+        },
+        {
+          id: "foxtrot",
+          title: "Target Foxtrot: The Encrypted Databurst",
+          description: `A fast data packet. Its frequency (in MHz) is derived from today's date (${GAME_DATE.year}${String(GAME_DATE.month).padStart(2,'0')}${String(GAME_DATE.day).padStart(2,'0')}). Sum the digits of this date number. Multiply by the number of letters in the current month (${GAME_DATE.monthName}). This is your frequency. Requires 'DECODE_PROTOCOL: XOR_STREAM'.`,
+          targetFrequency: (() => {
+            const dateStr = `${GAME_DATE.year}${String(GAME_DATE.month).padStart(2,'0')}${String(GAME_DATE.day).padStart(2,'0')}`; // 20250510
+            const sumOfDigits = dateStr.split('').reduce((sum, digit) => sum + parseInt(digit), 0); // 15
+            const numLettersInMonth = GAME_DATE.monthName.length; // 3
+            return (sumOfDigits * numLettersInMonth).toString(); // 15 * 3 = 45 MHz
+          })(), // MHz
+          requiredSettings: { decodeProtocol: "XOR_STREAM" },
+          segment: "91"
+        }
+      ];
+
+      const finalSolution = "DELTA5ECHO91";
+
+      // --- React Component ---
+      function App() {
+        // Analyzer State
+        const [tunedFrequency, setTunedFrequency] = useState("");
+        const [auxPowerRerouted, setAuxPowerRerouted] = useState(false);
+        const [squelchLevel, setSquelchLevel] = useState(5); // Default 0-10
+        const [filterMode, setFilterMode] = useState("NORMAL"); // NORMAL, WIDE
+        const [decodeProtocol, setDecodeProtocol] = useState("FM"); // FM, AM, XOR_STREAM
+
+        // Game State
+        const [lockedSegments, setLockedSegments] = useState({});
+        const [feedbackMessage, setFeedbackMessage] = useState("Spectrum Analyzer Idle. Tune to a frequency and set parameters.");
+        const [spectrumVisual, setSpectrumVisual] = useState("Noise...");
+        const [gameSolved, setGameSolved] = useState(false);
+
+        const assembledCode = useMemo(() => {
+            return (clues.map(clue => lockedSegments[clue.id] || '_').join(''));
+        }, [lockedSegments]);
+
+        useEffect(() => {
+            if (assembledCode === finalSolution && !gameSolved) {
+                setFeedbackMessage(`SYSTEM OVERRIDE CODE ASSEMBLED: ${finalSolution}! Lockdown Deactivated!`);
+                setSpectrumVisual("All Systems Nominal. Congratulations!");
+                setGameSolved(true);
+            }
+        }, [assembledCode, gameSolved]);
+
+
+        const handleTune = (e) => {
+          setTunedFrequency(e.target.value);
+          setFeedbackMessage("Frequency input changed. Press 'Lock Signal' to attempt.");
+          setSpectrumVisual("Scanning...");
+        };
+
+        const handleLockSignal = () => {
+          if (gameSolved) {
+            setFeedbackMessage("Game already solved!");
+            return;
+          }
+
+          let signalFoundThisAttempt = false;
+          setSpectrumVisual("Analyzing signal...");
+
+          for (const clue of clues) {
+            // Check if already locked
+            if (lockedSegments[clue.id]) continue;
+
+            // Normalize frequency comparison (e.g. 45 vs 45.000)
+            const targetFreqNum = parseFloat(clue.targetFrequency);
+            const tunedFreqNum = parseFloat(tunedFrequency);
+            
+            // Allow for minor variations if target has decimals and input doesn't, or vice-versa for kHz/MHz handling
+            // For simplicity, direct string match for MHz targets, or numeric for kHz.
+            let frequencyMatch = false;
+            if (clue.targetFrequency.includes('.') || tunedFrequency.includes('.')) { // MHz style
+                frequencyMatch = Math.abs(targetFreqNum - tunedFreqNum) < 0.001;
+            } else { // kHz style
+                frequencyMatch = clue.targetFrequency === tunedFrequency;
+            }
+
+
+            if (frequencyMatch) {
+              let settingsMatch = true;
+              if (clue.requiredSettings.auxPowerRerouted !== undefined && clue.requiredSettings.auxPowerRerouted !== auxPowerRerouted) {
+                settingsMatch = false;
+              }
+              if (clue.requiredSettings.squelchLevel !== undefined && squelchLevel > clue.requiredSettings.squelchLevel) {
+                settingsMatch = false;
+              }
+              if (clue.requiredSettings.filterMode !== undefined && clue.requiredSettings.filterMode !== filterMode) {
+                settingsMatch = false;
+              }
+              if (clue.requiredSettings.decodeProtocol !== undefined && clue.requiredSettings.decodeProtocol !== decodeProtocol) {
+                settingsMatch = false;
+              }
+
+              if (settingsMatch) {
+                setLockedSegments(prev => ({ ...prev, [clue.id]: clue.segment }));
+                setFeedbackMessage(`Signal Locked for ${clue.title}! Segment "${clue.segment}" acquired.`);
+                setSpectrumVisual(`Strong signal detected at ${clue.targetFrequency} ${clue.targetFrequency.includes('.') ? 'MHz' : 'kHz'}. Data segment extracted.`);
+                signalFoundThisAttempt = true;
+                break; // Found a match, process one at a time
+              } else {
+                setFeedbackMessage(`Correct frequency ${tunedFrequency} for ${clue.title}, but analyzer settings are incorrect. Check notepad.`);
+                setSpectrumVisual("Weak or distorted signal due to incorrect settings.");
+                signalFoundThisAttempt = true; // Still provide feedback for correct freq
+                break;
+              }
+            }
+          }
+
+          if (!signalFoundThisAttempt) {
+            setFeedbackMessage(`No distinct phantom signal found at ${tunedFrequency} with current settings. Keep searching.`);
+            setSpectrumVisual("Noise... No clear signal detected.");
+          }
+        };
+        
+        const commonInputClass = "w-full p-2 border border-gray-600 rounded bg-gray-700 text-gray-200 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500";
+        const commonButtonClass = "p-2 rounded text-white transition-colors duration-150";
+        const commonLabelClass = "block text-sm font-medium text-gray-400 mb-1";
+
+        return (
+          <div className="p-4 md:p-6 bg-gray-800 shadow-2xl rounded-lg">
+            <h1 className="text-3xl md:text-4xl font-bold text-cyan-400 mb-6 text-center">Phantom Frequency Grid</h1>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              {/* Analyzer Controls Column */}
+              <div className="md:col-span-1 space-y-6 p-4 bg-gray-900 rounded-lg shadow-md">
+                <h2 className="text-xl font-semibold text-cyan-300 border-b border-gray-700 pb-2">Analyzer Controls</h2>
+                <div>
+                  <label htmlFor="frequency-tuner" className={commonLabelClass}>Frequency Tuner (e.g., 462.550 or 1659):</label>
+                  <input
+                    type="text"
+                    id="frequency-tuner"
+                    value={tunedFrequency}
+                    onChange={handleTune}
+                    placeholder="Enter frequency"
+                    className={commonInputClass}
+                    disabled={gameSolved}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="squelch-level" className={commonLabelClass}>Squelch Level: {squelchLevel}</label>
+                  <input
+                    type="range"
+                    id="squelch-level"
+                    min="0"
+                    max="10"
+                    value={squelchLevel}
+                    onChange={(e) => setSquelchLevel(parseInt(e.target.value))}
+                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                    disabled={gameSolved}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="filter-mode" className={commonLabelClass}>Filter Mode:</label>
+                  <select id="filter-mode" value={filterMode} onChange={(e) => setFilterMode(e.target.value)} className={commonInputClass} disabled={gameSolved}>
+                    <option value="NORMAL">NORMAL</option>
+                    <option value="WIDE">WIDE</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="decode-protocol" className={commonLabelClass}>Decode Protocol:</label>
+                  <select id="decode-protocol" value={decodeProtocol} onChange={(e) => setDecodeProtocol(e.target.value)} className={commonInputClass} disabled={gameSolved}>
+                    <option value="FM">FM</option>,
+                    <option value="AM">AM</option>
+                    <option value="XOR_STREAM">XOR_STREAM</option>
+                  </select>
+                </div>
+                
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="aux-power"
+                    checked={auxPowerRerouted}
+                    onChange={(e) => setAuxPowerRerouted(e.target.checked)}
+                    className="h-4 w-4 text-cyan-600 border-gray-500 rounded focus:ring-cyan-500 mr-2"
+                    disabled={gameSolved}
+                  />
+                  <label htmlFor="aux-power" className="text-sm text-gray-300">AUX_POWER_REROUTE Active</label>
+                </div>
+
+                <button
+                  onClick={handleLockSignal}
+                  className={`${commonButtonClass} w-full bg-cyan-600 hover:bg-cyan-700 font-semibold text-lg`}
+                  disabled={gameSolved}
+                >
+                  Lock Signal
+                </button>
+              </div>
+
+              {/* Spectrum Display & Feedback Column */}
+              <div className="md:col-span-2 space-y-6 p-4 bg-gray-900 rounded-lg shadow-md">
+                 <div>
+                    <h2 className="text-xl font-semibold text-cyan-300 border-b border-gray-700 pb-2">Spectrum Analyzer Display</h2>
+                    <div className="mt-2 p-4 h-24 bg-black text-green-400 font-mono text-sm rounded overflow-y-auto border border-green-700">
+                        {spectrumVisual}
+                    </div>
+                </div>
+                <div>
+                    <h2 className="text-xl font-semibold text-cyan-300 border-b border-gray-700 pb-2">System Feedback</h2>
+                    <div className="mt-2 p-3 bg-gray-700 text-gray-200 rounded text-sm min-h-[60px]">
+                        {feedbackMessage}
+                    </div>
+                </div>
+                <div>
+                    <h2 className="text-xl font-semibold text-cyan-300 border-b border-gray-700 pb-2">Assembled Deactivation Code</h2>
+                    <div className="mt-2 p-4 bg-gray-700 text-yellow-300 font-mono text-2xl tracking-widest rounded text-center">
+                        {assembledCode.split('').map((char, idx) => <span key={idx} className={char === '_' ? 'text-gray-500' : ''}>{char}</span>).reduce((acc, curr, idx) => [acc, <span key={`space-${idx}`} className="mx-1"></span>, curr])}
+                    </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Notepad Clues Section */}
+            <div className="mt-8 p-4 bg-gray-900 rounded-lg shadow-md">
+              <h2 className="text-2xl font-semibold text-cyan-300 mb-4 border-b border-gray-700 pb-2">Field Agent's Encrypted Notepad</h2>
+              <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
+                {clues.map((clue) => (
+                  <div key={clue.id} className="p-4 bg-gray-800 rounded shadow">
+                    <h3 className="text-lg font-semibold text-cyan-400">{clue.title} {lockedSegments[clue.id] ? <span className="text-green-400 ml-2">(SEGMENT ACQUIRED)</span> : ""}</h3>
+                    <p className="text-sm text-gray-300 mt-1">{clue.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            {gameSolved && (
+                <div className="mt-8 p-6 bg-green-700 text-white text-center rounded-lg shadow-xl">
+                    <h2 className="text-3xl font-bold">PUZZLE SOLVED!</h2>
+                    <p className="text-lg mt-2">The deactivation code <strong className="font-mono">{finalSolution}</strong> is correct!</p>
+                </div>
+            )}
+
+          </div>
+        );
+      }
+
+      // Render the App
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+</body>
+</html>
