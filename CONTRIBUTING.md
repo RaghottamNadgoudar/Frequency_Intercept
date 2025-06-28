@@ -14,5 +14,3 @@ Please be respectful and constructive in all interactions.
 ## Issues
 If you find a bug or have a feature request, please open an issue with details and steps to reproduce.
 
-## License
-By contributing, you agree that your contributions will be licensed under the MIT License.
